@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal Lab — Live Waveform, Aliasing &amp; Spectrum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0c1210;
+    --panel: #121a17;
+    --panel-raised: #17211d;
+    --line: #253430;
+    --trace-a: #46e08a;
+    --trace-b: #4d5e57;
+    --amber: #f2a94e;
+    --red: #ef5b5b;
+    --blue: #6fb3e0;
+    --text: #e7efe9;
+    --text-dim: #7f9089;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--sans); height: 100%; overflow: hidden; }
+  body { display: flex; justify-content: center; align-items: center; padding: 10px 14px; }
+  .console { width: 100%; max-width: 1320px; height: 100%; max-height: 100%; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex: 0 0 auto; flex-wrap: wrap; }
+  h1 { font-family: var(--mono); font-size: 17px; font-weight: 600; letter-spacing: 0.02em; margin: 0; }
+  .sub { margin: 0; color: var(--text-dim); font-size: 11.5px; }
+
+  .stage { display: flex; gap: 8px; align-items: stretch; flex: 5 1 0; min-height: 0; }
+  .vpanel {
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    width: 72px; flex-shrink: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 4px;
+  }
+  .vlabel { font-size: 9px; letter-spacing: 0.03em; color: var(--text-dim); text-align: center; line-height: 1.25; }
+  .vfader-wrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; padding: 4px 0; min-height: 0; }
+  .vfader-wrap input[type="range"].vfader {
+    writing-mode: vertical-lr; direction: rtl;
+    -webkit-appearance: slider-vertical; appearance: slider-vertical;
+    width: 10px; height: 100%; margin: 0;
+  }
+  .vfader-wrap input[type="range"].vfader::-webkit-slider-thumb { margin-top: 0; }
+  .vvalue { font-family: var(--mono); font-size: 12px; color: var(--trace-a); text-align: center; white-space: nowrap; }
+
+  .scope-wrap {
+    flex: 1; min-width: 0; min-height: 0; position: relative;
+    background: #070b09; border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+  }
+  canvas#scope { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
+  .scope-readout { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: #0a100d; flex: 0 0 auto; }
+  .readout { padding: 5px 10px; border-right: 1px solid var(--line); }
+  .readout:last-child { border-right: none; }
+  .readout .label { display: block; font-size: 9px; color: var(--text-dim); margin-bottom: 2px; }
+  .readout .value { display: block; font-family: var(--mono); font-size: 13px; color: var(--trace-a); letter-spacing: 0.01em; }
+
+  .pan-row { display: flex; align-items: center; gap: 10px; padding: 4px 10px; border-top: 1px solid var(--line); background: #0a100d; flex: 0 0 auto; }
+  .pan-row .pan-label { font-size: 9px; color: var(--text-dim); white-space: nowrap; min-width: 56px; }
+  .pan-row input[type="range"] { margin: 0; }
+  .pan-row.disabled { opacity: 0.35; pointer-events: none; }
+
+  .legend { display: flex; gap: 16px; font-size: 10.5px; color: var(--text-dim); flex-wrap: wrap; flex: 0 0 auto; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .swatch { width: 12px; height: 2px; display: inline-block; }
+  .swatch-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .swatch-line-dashed { width: 12px; height: 0; border-top: 1px dashed var(--amber); display: inline-block; }
+  .swatch-line-blue { width: 12px; height: 2px; background: var(--blue); display: inline-block; }
+
+  .spectrum-panel {
+    background: #070b09; border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+    flex: 2 1 0; min-height: 0; display: flex; flex-direction: column;
+  }
+  .spectrum-title {
+    display: flex; justify-content: space-between; align-items: center; flex: 0 0 auto;
+    padding: 4px 10px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.03em;
+    border-bottom: 1px solid var(--line); background: #0a100d;
+  }
+  canvas#spectrum { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
+
+  .controls {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px;
+    flex: 3.6 1 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden;
+  }
+  .transport { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex: 0 0 auto; }
+  .transport.secondary { padding-top: 6px; border-top: 1px solid var(--line); }
+  .group-label { font-size: 10.5px; color: var(--text-dim); margin-right: 2px; white-space: nowrap; }
+  .btn {
+    font-family: var(--sans); font-size: 12px; font-weight: 500; color: var(--text);
+    background: var(--panel-raised); border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 12px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  }
+  .btn:hover:not(:disabled) { border-color: #3a4d46; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-rec.live { background: var(--red); border-color: var(--red); color: #2a0d0d; }
+  .btn-pause.on { background: #d9e34a; border-color: #d9e34a; color: #232a05; }
+
+  .seg-group { display: inline-flex; gap: 3px; background: #0e1512; border: 1px solid var(--line); border-radius: 6px; padding: 2px; }
+  .seg-btn {
+    font-family: var(--sans); font-size: 11.5px; font-weight: 500; color: var(--text-dim);
+    background: transparent; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer;
+  }
+  .seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .seg-btn.active { background: var(--trace-a); color: #0a1c11; }
+
+  .toggle-line { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); margin-left: auto; }
+  .toggle-line input[type="checkbox"] { accent-color: var(--trace-a); width: 14px; height: 14px; cursor: pointer; }
+  .toggle-line label { cursor: pointer; }
+
+  .fader-row { display: flex; flex-wrap: wrap; gap: 14px; flex: 0 0 auto; }
+  .fader { flex: 1 1 150px; min-width: 130px; }
+  .fader label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+  .fader label span.val { font-family: var(--mono); color: var(--text); }
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 5px; border-radius: 2.5px; background: var(--line); outline: none; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 17px; height: 17px; border-radius: 50%;
+    background: var(--trace-a); border: 2px solid #0a100d; cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--trace-a); border: 2px solid #0a100d; cursor: pointer; }
+  input[type="range"]::-moz-range-track { height: 5px; border-radius: 2.5px; background: var(--line); }
+  input[type="range"]:disabled::-webkit-slider-thumb { background: var(--text-dim); }
+
+  .tone-row { display: none; }
+
+  .hint { font-size: 10.5px; color: var(--text-dim); line-height: 1.35; flex: 0 0 auto; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .hint.error { color: var(--red); }
+
+  /* Below this, a widescreen no-scroll layout doesn't fit comfortably — fall back to a normal
+     scrolling page with everything stacked vertically. */
+  @media (max-width: 720px), (max-height: 560px) {
+    html, body { height: auto; overflow: auto; }
+    body { align-items: flex-start; padding: 24px 16px 40px; }
+    .console { height: auto; max-height: none; gap: 14px; }
+    header { margin-bottom: 4px; }
+    .stage { flex-direction: column; flex: none; }
+    .vpanel { width: auto; flex-direction: row; justify-content: flex-start; gap: 12px; }
+    .vfader-wrap { width: auto; flex: 1; padding: 0; }
+    .vfader-wrap input[type="range"].vfader {
+      writing-mode: horizontal-tb; direction: ltr;
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 5px;
+    }
+    .vlabel { white-space: nowrap; }
+    canvas#scope { height: 220px; }
+    .legend { margin-top: 4px; }
+    .spectrum-panel { flex: none; margin-top: 8px; }
+    canvas#spectrum { height: 140px; }
+    .controls { flex: none; margin-top: 12px; overflow: visible; gap: 14px; padding: 16px 18px; }
+    .transport { margin-bottom: 0; }
+    .fader-row { gap: 20px; }
+    .hint { -webkit-line-clamp: initial; }
+  }
+</style>
+</head>
+<body>
+<div class="console">
+  <header>
+    <h1>SIGNAL LAB</h1>
+    <p class="sub">live input · sample-rate &amp; bit-depth quantization · aliasing · spectrum</p>
+  </header>
+
+  <div class="stage">
+    <div class="vpanel">
+      <span class="vlabel">SAMPLE<br>RATE</span>
+      <div class="vfader-wrap"><input type="range" id="srSlider" class="vfader" min="0" max="1000" value="1000" disabled></div>
+      <span class="vvalue" id="srVal">44100 Hz</span>
+    </div>
+
+    <div class="scope-wrap">
+      <canvas id="scope"></canvas>
+      <div class="scope-readout">
+        <div class="readout"><span class="label">SAMPLE RATE</span><span class="value" id="srReadout">—</span></div>
+        <div class="readout"><span class="label">BIT DEPTH</span><span class="value" id="bdReadout">—</span></div>
+        <div class="readout"><span class="label">NYQUIST</span><span class="value" id="nyqReadout">—</span></div>
+        <div class="readout"><span class="label">BITRATE</span><span class="value" id="brReadout">—</span></div>
+      </div>
+      <div class="pan-row" id="panRow">
+        <span class="pan-label">SCRUB ◂ ▸</span>
+        <input type="range" id="panSlider" min="0" max="1000" value="1000" disabled>
+      </div>
+    </div>
+
+    <div class="vpanel">
+      <span class="vlabel">BIT<br>DEPTH</span>
+      <div class="vfader-wrap"><input type="range" id="bdSlider" class="vfader" min="1" max="16" step="1" value="16" disabled></div>
+      <span class="vvalue" id="bdVal">16 bit</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="swatch" style="background:var(--trace-b)"></i> raw input</span>
+    <span><i class="swatch-dot" style="background:var(--trace-a)"></i> sampled points</span>
+  </div>
+
+  <div class="spectrum-panel">
+    <div class="spectrum-title">
+      <span>LIVE SPECTRUM</span>
+      <span style="display:flex; gap:14px;">
+        <span style="display:flex; align-items:center; gap:6px;"><i class="swatch" style="background:var(--trace-b)"></i>raw</span>
+        <span style="display:flex; align-items:center; gap:6px;"><i class="swatch" style="background:var(--trace-a)"></i>sampled</span>
+        <span style="display:flex; align-items:center; gap:6px;"><i class="swatch-line-dashed"></i>Nyquist</span>
+        <span id="toneLegend" style="display:none; align-items:center; gap:6px;"><i class="swatch-line-blue"></i>tone</span>
+      </span>
+    </div>
+    <canvas id="spectrum"></canvas>
+  </div>
+
+  <div class="controls">
+    <div class="transport">
+      <button class="btn btn-rec" id="startBtn">● Start</button>
+      <button class="btn btn-pause" id="pauseBtn" disabled>Pause</button>
+      <span class="toggle-line">
+        <input type="checkbox" id="rollingToggle" checked>
+        <label for="rollingToggle">Rolling window</label>
+      </span>
+    </div>
+
+    <div class="transport secondary">
+      <span class="group-label">Source</span>
+      <div class="seg-group">
+        <button class="seg-btn active" id="sourceMicBtn">🎤 Mic</button>
+        <button class="seg-btn" id="sourceToneBtn">∿ Test tone</button>
+      </div>
+      <span class="group-label" style="margin-left:12px;">Monitor</span>
+      <div class="seg-group">
+        <button class="seg-btn active" id="monitorOffBtn" disabled>Off</button>
+        <button class="seg-btn" id="monitorRawBtn" disabled>Raw</button>
+        <button class="seg-btn" id="monitorProcBtn" disabled>Sampled (aliased)</button>
+      </div>
+    </div>
+
+    <div class="fader-row">
+      <div class="fader">
+        <label for="hZoomSlider">Zoom — time <span class="val" id="hZoomVal">—</span></label>
+        <input type="range" id="hZoomSlider" min="0" max="1000" value="0" disabled>
+      </div>
+      <div class="fader">
+        <label for="vZoomSlider">Zoom — amplitude <span class="val" id="vZoomVal">—</span></label>
+        <input type="range" id="vZoomSlider" min="0" max="1000" value="0" disabled>
+      </div>
+      <div class="fader">
+        <label for="dotSizeSlider">Dot size <span class="val" id="dotSizeVal">2 px</span></label>
+        <input type="range" id="dotSizeSlider" min="1" max="8" step="1" value="2">
+      </div>
+      <div class="fader tone-row" id="toneRow">
+        <label for="toneFreqSlider">Tone frequency <span class="val" id="toneFreqVal">440 Hz</span></label>
+        <input type="range" id="toneFreqSlider" min="0" max="1000" value="0">
+      </div>
+    </div>
+
+    <p class="hint" id="hint">Click "Start" and allow mic access (or switch to Test tone — no permission needed). Pull the faders and watch the sampled dots and spectrum change live. Set the tone above the dashed Nyquist line to see/hear aliasing.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const rollingToggle = document.getElementById('rollingToggle');
+  const sourceMicBtn = document.getElementById('sourceMicBtn');
+  const sourceToneBtn = document.getElementById('sourceToneBtn');
+  const monitorOffBtn = document.getElementById('monitorOffBtn');
+  const monitorRawBtn = document.getElementById('monitorRawBtn');
+  const monitorProcBtn = document.getElementById('monitorProcBtn');
+  const toneRow = document.getElementById('toneRow');
+  const toneLegend = document.getElementById('toneLegend');
+  const toneFreqSlider = document.getElementById('toneFreqSlider');
+  const toneFreqVal = document.getElementById('toneFreqVal');
+  const srSlider = document.getElementById('srSlider');
+  const bdSlider = document.getElementById('bdSlider');
+  const hZoomSlider = document.getElementById('hZoomSlider');
+  const vZoomSlider = document.getElementById('vZoomSlider');
+  const dotSizeSlider = document.getElementById('dotSizeSlider');
+  const panSlider = document.getElementById('panSlider');
+  const panRow = document.getElementById('panRow');
+  const srVal = document.getElementById('srVal');
+  const bdVal = document.getElementById('bdVal');
+  const hZoomVal = document.getElementById('hZoomVal');
+  const vZoomVal = document.getElementById('vZoomVal');
+  const dotSizeVal = document.getElementById('dotSizeVal');
+  const srReadout = document.getElementById('srReadout');
+  const bdReadout = document.getElementById('bdReadout');
+  const nyqReadout = document.getElementById('nyqReadout');
+  const brReadout = document.getElementById('brReadout');
+  const hint = document.getElementById('hint');
+  const canvas = document.getElementById('scope');
+  const ctx2d = canvas.getContext('2d');
+  const specCanvas = document.getElementById('spectrum');
+  const specCtx = specCanvas.getContext('2d');
+
+  const MIN_SR = 200;
+  const MIN_MS = 20, MAX_MS = 5000;
+  const MIN_VZ = 0.25, MAX_VZ = 16;
+  const MIN_TONE = 20, MAX_TONE = 20000;
+  const HISTORY_SECONDS = 10;
+  const SPEC_N = 2048;
+  const DOT_MODE_MAX = 4000;
+
+  let audioCtx = null, processor = null;
+  let currentSourceNode = null, currentSourceCleanup = null, stream = null, activeOscillator = null;
+  let running = false, paused = false;
+  let inputSource = 'mic';
+  let monitorMode = 'off';
+  let targetSampleRate = 44100, bitDepth = 16;
+  let toneFreq = 440;
+  let dotRadius = 2;
+  let monitorHold = 0, monitorPhase = 0;
+  let ringOriginal = null, capacitySamples = 0, writePos = 0, totalWritten = 0;
+  let windowMs = 40, vZoom = 1;
+
+  function sliderToLog(v, min, max) { return min * Math.pow(max / min, v / 1000); }
+  function logToSlider(val, min, max) { return Math.round(1000 * Math.log(val / min) / Math.log(max / min)); }
+  function sliderToRate(v) { const maxSr = (audioCtx ? audioCtx.sampleRate : 48000); return Math.round(MIN_SR * Math.pow(maxSr / MIN_SR, v / 1000)); }
+  function fmtHz(hz) { return hz >= 1000 ? (hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1) + ' kHz' : Math.round(hz) + ' Hz'; }
+  function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : Math.round(ms) + ' ms'; }
+
+  function updateReadouts() {
+    srVal.textContent = fmtHz(targetSampleRate);
+    bdVal.textContent = bitDepth + ' bit';
+    srReadout.textContent = fmtHz(targetSampleRate);
+    bdReadout.textContent = bitDepth + '-bit';
+    nyqReadout.textContent = fmtHz(Math.round(targetSampleRate / 2));
+    const kbps = (targetSampleRate * bitDepth) / 1000;
+    brReadout.textContent = kbps.toFixed(kbps >= 100 ? 0 : 1) + ' kbps';
+    hZoomVal.textContent = fmtMs(windowMs);
+    vZoomVal.textContent = vZoom.toFixed(vZoom < 1 ? 2 : 1) + '×';
+    toneFreqVal.textContent = fmtHz(toneFreq);
+    dotSizeVal.textContent = dotRadius + ' px';
+  }
+
+  srSlider.addEventListener('input', () => { targetSampleRate = sliderToRate(parseInt(srSlider.value, 10)); updateReadouts(); });
+  bdSlider.addEventListener('input', () => { bitDepth = parseInt(bdSlider.value, 10); updateReadouts(); });
+  hZoomSlider.addEventListener('input', () => { windowMs = sliderToLog(parseInt(hZoomSlider.value, 10), MIN_MS, MAX_MS); updateReadouts(); });
+  vZoomSlider.addEventListener('input', () => { vZoom = sliderToLog(parseInt(vZoomSlider.value, 10), MIN_VZ, MAX_VZ); updateReadouts(); });
+  dotSizeSlider.addEventListener('input', () => { dotRadius = parseInt(dotSizeSlider.value, 10); updateReadouts(); });
+  toneFreqSlider.addEventListener('input', () => {
+    toneFreq = sliderToLog(parseInt(toneFreqSlider.value, 10), MIN_TONE, MAX_TONE);
+    updateReadouts();
+    if (activeOscillator && audioCtx) activeOscillator.frequency.setValueAtTime(toneFreq, audioCtx.currentTime);
+  });
+
+  function refreshFollowState() {
+    const effectiveFollow = rollingToggle.checked && !paused;
+    if (effectiveFollow) { panRow.classList.add('disabled'); panSlider.disabled = true; }
+    else if (running) { panRow.classList.remove('disabled'); panSlider.disabled = false; }
+  }
+  rollingToggle.addEventListener('change', () => { if (!rollingToggle.checked) panSlider.value = 1000; refreshFollowState(); });
+
+  function updateSourceUI() {
+    sourceMicBtn.classList.toggle('active', inputSource === 'mic');
+    sourceToneBtn.classList.toggle('active', inputSource === 'tone');
+    toneRow.style.display = inputSource === 'tone' ? 'block' : 'none';
+    toneLegend.style.display = inputSource === 'tone' ? 'flex' : 'none';
+  }
+  function updateMonitorUI() {
+    monitorOffBtn.classList.toggle('active', monitorMode === 'off');
+    monitorRawBtn.classList.toggle('active', monitorMode === 'raw');
+    monitorProcBtn.classList.toggle('active', monitorMode === 'processed');
+  }
+  updateSourceUI(); updateMonitorUI(); updateReadouts();
+
+  toneFreqSlider.value = logToSlider(toneFreq, MIN_TONE, MAX_TONE);
+
+  function resizeCanvases() {
+    const dpr = window.devicePixelRatio || 1;
+    [[canvas, ctx2d], [specCanvas, specCtx]].forEach(([cv, c]) => {
+      const rect = cv.getBoundingClientRect();
+      cv.width = rect.width * dpr; cv.height = rect.height * dpr;
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+  }
+  window.addEventListener('resize', resizeCanvases);
+  resizeCanvases();
+
+  function drawGrid(w, h) {
+    ctx2d.strokeStyle = 'rgba(70, 224, 138, 0.06)'; ctx2d.lineWidth = 1;
+    for (let i = 1; i < 12; i++) { const x = Math.round((w / 12) * i) + 0.5; ctx2d.beginPath(); ctx2d.moveTo(x, 0); ctx2d.lineTo(x, h); ctx2d.stroke(); }
+    for (let i = 1; i < 6; i++) { const y = Math.round((h / 6) * i) + 0.5; ctx2d.beginPath(); ctx2d.moveTo(0, y); ctx2d.lineTo(w, y); ctx2d.stroke(); }
+    ctx2d.strokeStyle = 'rgba(70, 224, 138, 0.14)';
+    ctx2d.beginPath(); ctx2d.moveTo(0, h / 2 + 0.5); ctx2d.lineTo(w, h / 2 + 0.5); ctx2d.stroke();
+  }
+
+  function readRingLinear(startAbs, count) {
+    const out = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const absIdx = startAbs + i;
+      const phys = ((absIdx % capacitySamples) + capacitySamples) % capacitySamples;
+      out[i] = ringOriginal[phys];
+    }
+    return out;
+  }
+
+  function computeProcessed(rawArr) {
+    const out = new Float32Array(rawArr.length);
+    const ctxRate = audioCtx.sampleRate;
+    const levels = Math.pow(2, bitDepth);
+    const scale = levels / 2;
+    let phase = 0, hold = 0;
+    for (let i = 0; i < rawArr.length; i++) {
+      phase += targetSampleRate;
+      if (phase >= ctxRate) { phase -= ctxRate; hold = rawArr[i]; }
+      let q = Math.round(hold * scale) / scale;
+      if (q > 1) q = 1; if (q < -1) q = -1;
+      out[i] = q;
+    }
+    return out;
+  }
+
+  // The actual discrete samples the target rate would produce over this window —
+  // one quantized value per real sample instant, not a repeated/held array.
+  function computeSampledPoints(rawArr, ctxRate) {
+    const n = Math.max(1, Math.min(rawArr.length, Math.round(rawArr.length * targetSampleRate / ctxRate)));
+    const levels = Math.pow(2, bitDepth);
+    const scale = levels / 2;
+    const out = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const idx = Math.min(rawArr.length - 1, Math.round(k * (ctxRate / targetSampleRate)));
+      let q = Math.round(rawArr[idx] * scale) / scale;
+      if (q > 1) q = 1; if (q < -1) q = -1;
+      out[k] = q;
+    }
+    return out;
+  }
+
+  function drawLine(arr, color, lineWidth, w, h) {
+    const n = arr.length; if (n <= 0) return;
+    ctx2d.strokeStyle = color; ctx2d.lineWidth = lineWidth;
+    ctx2d.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / n) * w;
+      const y = h / 2 - arr[i] * vZoom * (h / 2) * 0.92;
+      if (i === 0) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+    }
+    ctx2d.stroke();
+  }
+
+  function drawEnvelope(arr, color, w, h) {
+    const n = arr.length; if (n <= 0) return;
+    const pixelsW = Math.max(1, Math.floor(w));
+    const samplesPerPixel = n / pixelsW;
+    ctx2d.strokeStyle = color; ctx2d.lineWidth = 2;
+    ctx2d.beginPath();
+    for (let px = 0; px < pixelsW; px++) {
+      const s0 = Math.floor(px * samplesPerPixel);
+      const s1 = Math.max(s0 + 1, Math.floor((px + 1) * samplesPerPixel));
+      let mn = 1, mx = -1;
+      for (let i = s0; i < s1 && i < n; i++) { const v = arr[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+      const x = px + 0.5;
+      ctx2d.moveTo(x, h / 2 - mx * vZoom * (h / 2) * 0.92);
+      ctx2d.lineTo(x, h / 2 - mn * vZoom * (h / 2) * 0.92);
+    }
+    ctx2d.stroke();
+  }
+
+  function drawDots(arr, color, radius, w, h) {
+    const n = arr.length; if (n <= 0) return;
+    ctx2d.fillStyle = color;
+    const denom = n > 1 ? n - 1 : 1;
+    for (let i = 0; i < n; i++) {
+      const x = (i / denom) * w;
+      const y = h / 2 - arr[i] * vZoom * (h / 2) * 0.92;
+      ctx2d.beginPath(); ctx2d.arc(x, y, radius, 0, Math.PI * 2); ctx2d.fill();
+    }
+  }
+
+  // ---- FFT (iterative radix-2 Cooley-Tukey), n must be a power of two ----
+  function fft(re, im) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = -2 * Math.PI / len;
+      const wr0 = Math.cos(ang), wi0 = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let curWr = 1, curWi = 0;
+        for (let j = 0; j < len / 2; j++) {
+          const ur = re[i + j], ui = im[i + j];
+          const vr = re[i + j + len / 2] * curWr - im[i + j + len / 2] * curWi;
+          const vi = re[i + j + len / 2] * curWi + im[i + j + len / 2] * curWr;
+          re[i + j] = ur + vr; im[i + j] = ui + vi;
+          re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
+          const nWr = curWr * wr0 - curWi * wi0, nWi = curWr * wi0 + curWi * wr0;
+          curWr = nWr; curWi = nWi;
+        }
+      }
+    }
+  }
+  function computeSpectrumDb(samples) {
+    const n = samples.length;
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); re[i] = samples[i] * w; }
+    fft(re, im);
+    const half = n / 2;
+    const db = new Float64Array(half);
+    for (let i = 0; i < half; i++) {
+      const mag = Math.sqrt(re[i] * re[i] + im[i] * im[i]) / half;
+      db[i] = 20 * Math.log10(mag + 1e-7);
+    }
+    return db;
+  }
+
+  function drawSpectrumTraces(dbRaw, dbProc, ctxNyquist) {
+    const rect = specCanvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    specCtx.clearRect(0, 0, w, h);
+    specCtx.strokeStyle = 'rgba(70, 224, 138, 0.06)'; specCtx.lineWidth = 1;
+    for (let i = 1; i < 8; i++) { const x = Math.round((w / 8) * i) + 0.5; specCtx.beginPath(); specCtx.moveTo(x, 0); specCtx.lineTo(x, h); specCtx.stroke(); }
+
+    const DB_MIN = -80, DB_MAX = 6;
+    function toY(db) { const t = Math.max(0, Math.min(1, (db - DB_MIN) / (DB_MAX - DB_MIN))); return h - t * h; }
+
+    function plot(db, color, lw) {
+      specCtx.strokeStyle = color; specCtx.lineWidth = lw;
+      specCtx.beginPath();
+      for (let i = 0; i < db.length; i++) {
+        const x = (i / db.length) * w;
+        const y = toY(db[i]);
+        if (i === 0) specCtx.moveTo(x, y); else specCtx.lineTo(x, y);
+      }
+      specCtx.stroke();
+    }
+    plot(dbRaw, 'rgba(120, 145, 135, 0.65)', 1);
+    plot(dbProc, '#46e08a', 1.6);
+
+    // Nyquist marker for the current target sample rate
+    const nyq = targetSampleRate / 2;
+    const nyqX = Math.min(w, (nyq / ctxNyquist) * w);
+    specCtx.strokeStyle = 'var(--amber)'.startsWith('var') ? '#f2a94e' : '#f2a94e';
+    specCtx.setLineDash([4, 4]);
+    specCtx.lineWidth = 1;
+    specCtx.beginPath(); specCtx.moveTo(nyqX, 0); specCtx.lineTo(nyqX, h); specCtx.stroke();
+    specCtx.setLineDash([]);
+
+    if (inputSource === 'tone') {
+      const toneX = Math.min(w, (toneFreq / ctxNyquist) * w);
+      specCtx.strokeStyle = '#6fb3e0'; specCtx.lineWidth = 1;
+      specCtx.beginPath(); specCtx.moveTo(toneX, 0); specCtx.lineTo(toneX, h); specCtx.stroke();
+    }
+  }
+
+  function renderLoop() {
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    ctx2d.clearRect(0, 0, w, h);
+    drawGrid(w, h);
+
+    if (capacitySamples > 0 && totalWritten > 0) {
+      const available = Math.min(totalWritten, capacitySamples);
+      let windowSamples = Math.round((windowMs / 1000) * audioCtx.sampleRate);
+      windowSamples = Math.max(4, Math.min(windowSamples, available));
+
+      const effectiveFollow = rollingToggle.checked && !paused;
+      let panSamples = 0;
+      if (!effectiveFollow) {
+        const maxPan = Math.max(0, available - windowSamples);
+        const frac = 1 - (parseInt(panSlider.value, 10) / 1000);
+        panSamples = Math.round(maxPan * frac);
+      }
+      const absEnd = totalWritten - panSamples;
+      const startAbs = absEnd - windowSamples;
+
+      const ctxRate = audioCtx.sampleRate;
+      const rawWindow = readRingLinear(startAbs, windowSamples);
+      drawLine(rawWindow, 'rgba(120, 145, 135, 0.55)', 1, w, h);
+
+      const samplePoints = computeSampledPoints(rawWindow, ctxRate);
+      if (samplePoints.length <= DOT_MODE_MAX) drawDots(samplePoints, '#46e08a', dotRadius, w, h);
+      else drawEnvelope(computeProcessed(rawWindow), '#46e08a', w, h);
+
+      // spectrum uses the same absolute end position (respects pause/scrub) but a fixed analysis length
+      const specStart = absEnd - SPEC_N;
+      const rawSpecWin = readRingLinear(specStart, SPEC_N);
+      const procSpecWin = computeProcessed(rawSpecWin);
+      const dbRaw = computeSpectrumDb(rawSpecWin);
+      const dbProc = computeSpectrumDb(procSpecWin);
+      drawSpectrumTraces(dbRaw, dbProc, audioCtx.sampleRate / 2);
+    } else {
+      specCtx.clearRect(0, 0, specCanvas.getBoundingClientRect().width, specCanvas.getBoundingClientRect().height);
+    }
+
+    requestAnimationFrame(renderLoop);
+  }
+  requestAnimationFrame(renderLoop);
+
+  function teardownSource() {
+    if (currentSourceNode) { try { currentSourceNode.disconnect(); } catch (e) {} }
+    if (currentSourceCleanup) currentSourceCleanup();
+    currentSourceNode = null; currentSourceCleanup = null; activeOscillator = null;
+  }
+
+  async function attachSource(kind) {
+    if (kind === 'mic') {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      stream = s;
+      const node = audioCtx.createMediaStreamSource(s);
+      currentSourceNode = node;
+      currentSourceCleanup = () => { s.getTracks().forEach(t => t.stop()); stream = null; };
+    } else {
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = toneFreq;
+      osc.start();
+      currentSourceNode = osc;
+      activeOscillator = osc;
+      currentSourceCleanup = () => { try { osc.stop(); } catch (e) {} };
+    }
+    currentSourceNode.connect(processor);
+  }
+
+  function setupProcessorCallback() {
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const output = e.outputBuffer.getChannelData(0);
+      const ctxRate = audioCtx.sampleRate;
+      const levels = Math.pow(2, bitDepth);
+      const scale = levels / 2;
+
+      for (let i = 0; i < input.length; i++) {
+        const x = input[i];
+
+        monitorPhase += targetSampleRate;
+        if (monitorPhase >= ctxRate) { monitorPhase -= ctxRate; monitorHold = x; }
+        let q = Math.round(monitorHold * scale) / scale;
+        if (q > 1) q = 1; if (q < -1) q = -1;
+        output[i] = monitorMode === 'raw' ? x : monitorMode === 'processed' ? q : 0;
+
+        if (!paused) {
+          ringOriginal[writePos] = x;
+          writePos = (writePos + 1) % capacitySamples;
+          totalWritten++;
+        }
+      }
+    };
+  }
+
+  function enableControls(on) {
+    srSlider.disabled = !on;
+    bdSlider.disabled = !on;
+    hZoomSlider.disabled = !on;
+    vZoomSlider.disabled = !on;
+    pauseBtn.disabled = !on;
+    monitorOffBtn.disabled = !on;
+    monitorRawBtn.disabled = !on;
+    monitorProcBtn.disabled = !on;
+    if (!on) { panSlider.disabled = true; panRow.classList.add('disabled'); }
+  }
+
+  async function startAll() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    processor = audioCtx.createScriptProcessor(1024, 1, 1);
+    capacitySamples = Math.round(HISTORY_SECONDS * audioCtx.sampleRate);
+    ringOriginal = new Float32Array(capacitySamples);
+    writePos = 0; totalWritten = 0;
+    targetSampleRate = audioCtx.sampleRate;
+    srSlider.value = 1000;
+
+    try {
+      await attachSource(inputSource);
+    } catch (err) {
+      hint.textContent = 'Microphone access was blocked or denied — check your browser permissions, or switch to Test tone (no permission needed).';
+      hint.classList.add('error');
+      try { audioCtx.close(); } catch (e) {}
+      audioCtx = null; processor = null;
+      return;
+    }
+
+    processor.connect(audioCtx.destination);
+    setupProcessorCallback();
+    enableControls(true);
+    updateReadouts();
+    refreshFollowState();
+
+    running = true;
+    startBtn.textContent = '■ Stop';
+    startBtn.classList.add('live');
+    hint.classList.remove('error');
+    hint.textContent = 'Live. Pull the faders and watch the sampled dots and spectrum respond. Switch Monitor to "Sampled" to hear the effect (use headphones with Mic input to avoid feedback).';
+  }
+
+  function stopAll() {
+    running = false; paused = false;
+    teardownSource();
+    if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
+    if (audioCtx) { try { audioCtx.close(); } catch (e) {} }
+    audioCtx = null; processor = null; ringOriginal = null;
+    capacitySamples = 0; writePos = 0; totalWritten = 0;
+
+    startBtn.textContent = '● Start';
+    startBtn.classList.remove('live');
+    pauseBtn.textContent = 'Pause'; pauseBtn.classList.remove('on');
+    monitorMode = 'off'; updateMonitorUI();
+    enableControls(false);
+    hint.classList.remove('error');
+    hint.textContent = 'Click "Start" and allow microphone access (or switch to Test tone — no permission needed). Pull the Sample Rate / Bit Depth faders and watch the sampled dots and spectrum change live. Set the tone above half the sample rate (the dashed Nyquist line) to see it fold into a false lower frequency — switch Monitor to "Sampled" to hear it.';
+  }
+
+  startBtn.addEventListener('click', () => { running ? stopAll() : startAll(); });
+
+  pauseBtn.addEventListener('click', () => {
+    if (!running) return;
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    pauseBtn.classList.toggle('on', paused);
+    if (paused) panSlider.value = 1000;
+    refreshFollowState();
+  });
+
+  async function selectSource(kind) {
+    if (kind === inputSource) return;
+    const prev = inputSource;
+    inputSource = kind;
+    updateSourceUI();
+    if (running) {
+      teardownSource();
+      writePos = 0; totalWritten = 0;
+      try {
+        await attachSource(kind);
+      } catch (err) {
+        inputSource = prev; updateSourceUI();
+        hint.textContent = 'Could not switch to microphone — permission denied.';
+        hint.classList.add('error');
+        try { await attachSource(prev); } catch (e2) { stopAll(); }
+      }
+    }
+  }
+  sourceMicBtn.addEventListener('click', () => selectSource('mic'));
+  sourceToneBtn.addEventListener('click', () => selectSource('tone'));
+
+  monitorOffBtn.addEventListener('click', () => { monitorMode = 'off'; updateMonitorUI(); });
+  monitorRawBtn.addEventListener('click', () => { monitorMode = 'raw'; updateMonitorUI(); });
+  monitorProcBtn.addEventListener('click', () => { monitorMode = 'processed'; updateMonitorUI(); });
+
+  hZoomSlider.value = logToSlider(windowMs, MIN_MS, MAX_MS);
+  vZoomSlider.value = logToSlider(vZoom, MIN_VZ, MAX_VZ);
+})();
+</script>
+</body>
+</html>
