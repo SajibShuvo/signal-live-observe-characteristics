@@ -395,18 +395,26 @@
     return out;
   }
 
+  // Mid-rise uniform quantizer: exactly 2^bitDepth distinct output levels,
+  // evenly spaced, with none of them sitting on zero (so 1-bit really is
+  // 2 levels, not 3).
+  function quantize(x) {
+    const levels = Math.pow(2, bitDepth);
+    const step = 2 / levels;
+    let idx = Math.floor((x + 1) / step);
+    if (idx < 0) idx = 0;
+    if (idx > levels - 1) idx = levels - 1;
+    return -1 + step * (idx + 0.5);
+  }
+
   function computeProcessed(rawArr) {
     const out = new Float32Array(rawArr.length);
     const ctxRate = audioCtx.sampleRate;
-    const levels = Math.pow(2, bitDepth);
-    const scale = levels / 2;
     let phase = 0, hold = 0;
     for (let i = 0; i < rawArr.length; i++) {
       phase += targetSampleRate;
       if (phase >= ctxRate) { phase -= ctxRate; hold = rawArr[i]; }
-      let q = Math.round(hold * scale) / scale;
-      if (q > 1) q = 1; if (q < -1) q = -1;
-      out[i] = q;
+      out[i] = quantize(hold);
     }
     return out;
   }
@@ -415,14 +423,10 @@
   // one quantized value per real sample instant, not a repeated/held array.
   function computeSampledPoints(rawArr, ctxRate) {
     const n = Math.max(1, Math.min(rawArr.length, Math.round(rawArr.length * targetSampleRate / ctxRate)));
-    const levels = Math.pow(2, bitDepth);
-    const scale = levels / 2;
     const out = new Float32Array(n);
     for (let k = 0; k < n; k++) {
       const idx = Math.min(rawArr.length - 1, Math.round(k * (ctxRate / targetSampleRate)));
-      let q = Math.round(rawArr[idx] * scale) / scale;
-      if (q > 1) q = 1; if (q < -1) q = -1;
-      out[k] = q;
+      out[k] = quantize(rawArr[idx]);
     }
     return out;
   }
@@ -621,16 +625,13 @@
       const input = e.inputBuffer.getChannelData(0);
       const output = e.outputBuffer.getChannelData(0);
       const ctxRate = audioCtx.sampleRate;
-      const levels = Math.pow(2, bitDepth);
-      const scale = levels / 2;
 
       for (let i = 0; i < input.length; i++) {
         const x = input[i];
 
         monitorPhase += targetSampleRate;
         if (monitorPhase >= ctxRate) { monitorPhase -= ctxRate; monitorHold = x; }
-        let q = Math.round(monitorHold * scale) / scale;
-        if (q > 1) q = 1; if (q < -1) q = -1;
+        const q = quantize(monitorHold);
         output[i] = monitorMode === 'raw' ? x : monitorMode === 'processed' ? q : 0;
 
         if (!paused) {
